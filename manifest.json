@@ -1,0 +1,10 @@
+{
+	"id": "order-list",
+	"name": "Order List",
+	"version": "1.0.1",
+	"minAppVersion": "0.9.12",
+	"description": "Orders list by number at end of line",
+	"author": "Henry Gustafson",
+	"authorUrl": "https://github.com/lizard-heart/",
+	"isDesktopOnly": false
+}
