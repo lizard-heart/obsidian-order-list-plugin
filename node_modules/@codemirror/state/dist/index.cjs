@@ -1516,10 +1516,11 @@ class EditorSelection {
     /**
     Create a selection range.
     */
-    static range(anchor, head, goalColumn) {
-        let goal = (goalColumn !== null && goalColumn !== void 0 ? goalColumn : 33554431 /* RangeFlag.NoGoalColumn */) << 5 /* RangeFlag.GoalColumnOffset */;
-        return head < anchor ? SelectionRange.create(head, anchor, 16 /* RangeFlag.Inverted */ | goal | 8 /* RangeFlag.AssocAfter */)
-            : SelectionRange.create(anchor, head, goal | (head > anchor ? 4 /* RangeFlag.AssocBefore */ : 0));
+    static range(anchor, head, goalColumn, bidiLevel) {
+        let flags = ((goalColumn !== null && goalColumn !== void 0 ? goalColumn : 33554431 /* RangeFlag.NoGoalColumn */) << 5 /* RangeFlag.GoalColumnOffset */) |
+            (bidiLevel == null ? 3 : Math.min(2, bidiLevel));
+        return head < anchor ? SelectionRange.create(head, anchor, 16 /* RangeFlag.Inverted */ | 8 /* RangeFlag.AssocAfter */ | flags)
+            : SelectionRange.create(anchor, head, (head > anchor ? 4 /* RangeFlag.AssocBefore */ : 0) | flags);
     }
     /**
     @internal
@@ -1664,17 +1665,19 @@ class FacetProvider {
                 return 0;
             },
             reconfigure: (state, oldState) => {
-                let newVal = getter(state);
-                let oldAddr = oldState.config.address[id];
+                let newVal, oldAddr = oldState.config.address[id];
                 if (oldAddr != null) {
                     let oldVal = getAddr(oldState, oldAddr);
                     if (this.dependencies.every(dep => {
                         return dep instanceof Facet ? oldState.facet(dep) === state.facet(dep) :
                             dep instanceof StateField ? oldState.field(dep, false) == state.field(dep, false) : true;
-                    }) || (multi ? compareArray(newVal, oldVal, compare) : compare(newVal, oldVal))) {
+                    }) || (multi ? compareArray(newVal = getter(state), oldVal, compare) : compare(newVal = getter(state), oldVal))) {
                         state.values[idx] = oldVal;
                         return 0;
                     }
+                }
+                else {
+                    newVal = getter(state);
                 }
                 state.values[idx] = newVal;
                 return 1 /* SlotStatus.Changed */;
@@ -2810,6 +2813,18 @@ class EditorState {
     /**
     Find the values for a given language data field, provided by the
     the [`languageData`](https://codemirror.net/6/docs/ref/#state.EditorState^languageData) facet.
+    
+    Examples of language data fields are...
+    
+    - [`"commentTokens"`](https://codemirror.net/6/docs/ref/#commands.CommentTokens) for specifying
+      comment syntax.
+    - [`"autocomplete"`](https://codemirror.net/6/docs/ref/#autocomplete.autocompletion^config.override)
+      for providing language-specific completion sources.
+    - [`"wordChars"`](https://codemirror.net/6/docs/ref/#state.EditorState.charCategorizer) for adding
+      characters that should be considered part of words in this
+      language.
+    - [`"closeBrackets"`](https://codemirror.net/6/docs/ref/#autocomplete.CloseBracketConfig) controls
+      bracket closing behavior.
     */
     languageDataAt(name, pos, side = -1) {
         let values = [];
@@ -3314,7 +3329,7 @@ class RangeSet {
     */
     static eq(oldSets, newSets, from = 0, to) {
         if (to == null)
-            to = 1000000000 /* C.Far */;
+            to = 1000000000 /* C.Far */ - 1;
         let a = oldSets.filter(set => !set.isEmpty && newSets.indexOf(set) < 0);
         let b = newSets.filter(set => !set.isEmpty && oldSets.indexOf(set) < 0);
         if (a.length != b.length)
@@ -3348,23 +3363,24 @@ class RangeSet {
     */
     minPointSize = -1) {
         let cursor = new SpanCursor(sets, null, minPointSize).goto(from), pos = from;
-        let open = cursor.openStart;
+        let openRanges = cursor.openStart;
         for (;;) {
             let curTo = Math.min(cursor.to, to);
             if (cursor.point) {
-                iterator.point(pos, curTo, cursor.point, cursor.activeForPoint(cursor.to), open, cursor.pointRank);
-                open = cursor.openEnd(curTo) + (cursor.to > curTo ? 1 : 0);
+                let active = cursor.activeForPoint(cursor.to);
+                let openCount = cursor.pointFrom < from ? active.length + 1 : Math.min(active.length, openRanges);
+                iterator.point(pos, curTo, cursor.point, active, openCount, cursor.pointRank);
+                openRanges = Math.min(cursor.openEnd(curTo), active.length);
             }
             else if (curTo > pos) {
-                iterator.span(pos, curTo, cursor.active, open);
-                open = cursor.openEnd(curTo);
+                iterator.span(pos, curTo, cursor.active, openRanges);
+                openRanges = cursor.openEnd(curTo);
             }
             if (cursor.to > to)
-                break;
+                return openRanges + (cursor.point && cursor.to > to ? 1 : 0);
             pos = cursor.to;
             cursor.next();
         }
-        return open;
     }
     /**
     Create a range set for the given range or array of ranges. By
@@ -3668,6 +3684,8 @@ class SpanCursor {
         this.pointRank = 0;
         this.to = -1000000000 /* C.Far */;
         this.endSide = 0;
+        // The amount of open active ranges at the start of the iterator.
+        // Not including points.
         this.openStart = -1;
         this.cursor = HeapCursor.from(sets, skip, minPoint);
     }
@@ -3708,7 +3726,7 @@ class SpanCursor {
     next() {
         let from = this.to, wasPoint = this.point;
         this.point = null;
-        let trackOpen = this.openStart < 0 ? [] : null, trackExtra = 0;
+        let trackOpen = this.openStart < 0 ? [] : null;
         for (;;) {
             let a = this.minActive;
             if (a > -1 && (this.activeTo[a] - this.cursor.from || this.active[a].endSide - this.cursor.startSide) < 0) {
@@ -3734,8 +3752,6 @@ class SpanCursor {
                 let nextVal = this.cursor.value;
                 if (!nextVal.point) { // Opening a range
                     this.addActive(trackOpen);
-                    if (this.cursor.from < from && this.cursor.to > from)
-                        trackExtra++;
                     this.cursor.next();
                 }
                 else if (wasPoint && this.cursor.to == this.to && this.cursor.from < this.cursor.to) {
@@ -3748,8 +3764,6 @@ class SpanCursor {
                     this.pointRank = this.cursor.rank;
                     this.to = this.cursor.to;
                     this.endSide = nextVal.endSide;
-                    if (this.cursor.from < from)
-                        trackExtra = 1;
                     this.cursor.next();
                     this.forward(this.to, this.endSide);
                     break;
@@ -3757,10 +3771,9 @@ class SpanCursor {
             }
         }
         if (trackOpen) {
-            let openStart = 0;
-            while (openStart < trackOpen.length && trackOpen[openStart] < from)
-                openStart++;
-            this.openStart = openStart + trackExtra;
+            this.openStart = 0;
+            for (let i = trackOpen.length - 1; i >= 0 && trackOpen[i] < from; i--)
+                this.openStart++;
         }
     }
     activeForPoint(to) {

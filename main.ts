@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, MarkdownView } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, MarkdownView, Editor } from 'obsidian';
 import * as CodeMirror from "codemirror";
 
 interface PluginSettings {
@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	regexReplace: ''
 }
 
-interface SelectionRange {
+interface EditorRange {
 	start: { line: number; ch: number };
 	end: { line: number; ch: number };
 }
@@ -27,14 +27,14 @@ export default class OrderList extends Plugin {
 		this.addCommand({
 			id: 'replace-selection',
 			name: 'Order selected list',
-			callback: () => this.findAndReplace()
+			editorCallback: () => this.findAndReplace()
 		});
 
 		this.addSettingTab(new SettingTab(this.app, this));
 	}
 
 	findAndReplace(): void {
-		let editor = this.getEditor();
+		let editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 		if (editor) {
 			let selectedText = this.getSelectedText(editor);
 			let lines = selectedText.split("\n");
@@ -62,16 +62,12 @@ export default class OrderList extends Plugin {
 				lines = selectedText.split("\n\n");
 			}
 
-			console.log(lines);
-
 			let linesList = [];
 			for (let i = 0; i < lines.length; i++) {
 				linesList.push([lines[i], this.evaluateLineValue(lines[i].split("\n")[0].split(" ").pop())]);
 			}
 
 			linesList.sort(function (a, b) { return a[1] - b[1] })
-
-			console.log(linesList)
 
 			selectedText = "";
 			for (let i = 0; i < linesList.length; i++) {
@@ -83,9 +79,9 @@ export default class OrderList extends Plugin {
 	}
 	
 
-	getEditor(): CodeMirror.Editor {
-		return this.app.workspace.getActiveViewOfType(MarkdownView)?.sourceMode.cmEditor;
-	}
+	// getEditor(): CodeMirror.Editor {
+	// 	return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+	// }
 
 	getSelectedText(editor: CodeMirror.Editor): string {
 		if (!editor.somethingSelected())
@@ -99,7 +95,7 @@ export default class OrderList extends Plugin {
 		editor.getDoc().setSelection(selection.start, selection.end);
 	}
 
-	getLineUnderCursor(editor: CodeMirror.Editor): SelectionRange {
+	getLineUnderCursor(editor: CodeMirror.Editor): EditorRange {
 		let fromCh, toCh: number;
 		let cursor = editor.getCursor();
 
@@ -113,7 +109,6 @@ export default class OrderList extends Plugin {
 	}
 
 	evaluateLineValue(line: string) {
-		console.log(line)
 		if (this.settings.shouldRegex == false) {
 			try {
 				return eval(line);
@@ -122,22 +117,13 @@ export default class OrderList extends Plugin {
 			}
 		} else {
 			try {
-				var re = new RegExp(this.settings.regex, '');
+				let re = new RegExp(this.settings.regex, '');
 				return eval(line.replace(re, this.settings.regexReplace));
-				// var re = new RegExp('(\d+)(.)','');
-				// return eval(line.replace(re, '$1'));
+
 			} catch {
-				console.log("regex error")
 				return 999999;
 			}
 		}
-		
-
-		// if (line = "") {
-		// 	return 99999;
-		// } else {
-		// 	return eval(line)
-		// }
 	}
 
 

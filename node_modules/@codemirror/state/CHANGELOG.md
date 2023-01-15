@@ -1,3 +1,23 @@
+## 6.2.0 (2022-12-26)
+
+### New features
+
+`EditorSelection.range` now accepts an optional 4th argument to specify the bidi level of the range's head position.
+
+## 6.1.4 (2022-11-15)
+
+### Bug fixes
+
+Fix a bug that caused the `openStart` value passed to span iterators to be incorrect around widgets in some circumstances.
+
+## 6.1.3 (2022-11-10)
+
+### Bug fixes
+
+Avoid unnecessary calls to computed facet getters when a state is reconfigured but no dependencies of the computed facet change.
+
+Fix an infinite loop in `RangeSet.eq` when the `to` parameter isn't given.
+
 ## 6.1.2 (2022-09-21)
 
 ### Bug fixes
